@@ -1,11 +1,12 @@
-"""
-Author: Carter Young, EAVI
-Date: 02/10/2024 - 02/18/2024
-
-This code represents an implementation of steps 3 & 4 for CS
-429, Project 1 (Flores, 2024).
-"""
 import csv
+"""
+Authors: EAVI, Carter Young
+
+Incorporate the L2 cache and write output to a new file step5Results
+Builds off of the WriteBack file
+Expect to see changes only within the L2 cache sections of the results since
+we've restricted all of the parameters for the L1 caches
+"""
 
 
 class WriteBackCache:
@@ -75,45 +76,85 @@ class WriteBackCache:
 
 
 def WBCacheSimulation(trace_name):
-    """ Sims cache given associativity for the passed traces.
-        Processes each mem access in trace, calcs hits/misses, hit rates, AMAT.
+    """
+    Simulate cache given associativity for the passed traces.
+    Processes each mem access in trace, calcs hits/misses, hit rates, AMAT.
     """
     associativities = [1, 2, 4, 8, 16, 32]
-    total_size_bytes = 1024
-    block_size_bytes = 32
     hit_time = 1  # H
     miss_penalty = 100  # M
-    csv_filename = f"WBResults/{trace_name}_wb.csv"
+    csv_filename = f"Pt5Results/{trace_name}_wb5.csv"
 
     trace_lines = read_trace_file(f"traces/{trace_name}.trace")
 
     with open(csv_filename, 'w', newline='') as csvfile:
-        fieldnames = ['Assoc.', 'L1I accesses', 'L1I misses', 'L1D accesses', 'L1D misses', 'L1I hit rate', 'L1D hit rate', 'L1I AMAT', 'L1D AMAT']
+        fieldnames = ['Assoc.', 'L1I accesses', 'L1I misses', 'L1D accesses', 'L1D misses', 'L2 accesses', 'L2 misses', 'L1I hit rate',
+                          'L1D hit rate', 'L2 hit rate','L1I AMAT', 'L1D AMAT', 'L2 AMAT']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
         for assoc in associativities:
-            i_cache = WriteBackCache(total_size_bytes, block_size_bytes, assoc)
-            d_cache = WriteBackCache(total_size_bytes, block_size_bytes, assoc)
+            # explicitly defining the cache params for my steake
+            i_cache = WriteBackCache(1024, 32, 2)
+            d_cache = WriteBackCache(1024, 32, 2)
+            l2Cache = WriteBackCache(16384, 128, assoc)
 
-            i_hits, i_misses, d_hits, d_misses = 0, 0, 0, 0
+            i_hits, i_misses, d_hits, d_misses, thit, tmiss = 0, 0, 0, 0, 0, 0
 
-            for reference_type, address in trace_lines:
+            for line in trace_lines:
+                reference_type, address = line  # Directly unpack the tuple
+
+                # Determine cache and action
                 if reference_type == 2:  # Instruction read
                     if i_cache.read(address):
                         i_hits += 1
                     else:
                         i_misses += 1
+
+                        # first, check L2 cache if instruction is there
+                        # if instruction is in L2 cache, load into i_cache
+                        # if not, store instruction to L2 cache
+                        if l2Cache.read(address):
+                            thit += 1
+                        else:
+                            tmiss += 1
+
                 else:  # Data read/write
-                    if d_cache.write(address) if reference_type == 1 else d_cache.read(address):
-                        d_hits += 1
-                    else:
-                        d_misses += 1
+                    if reference_type == 1:
+                        if d_cache.write(address):
+                            d_misses += 1
+                        else:
+                            if d_cache.read(address):
+                                d_hits += 1
+                            else:
+                                d_misses += 1
+
+                                # same as the i_cache process
+                                # first, check L2 cache if data is there
+                                # if instruction is in L2 cache, load into d_cache
+                                # if not, store data to L2 cache
+                                if l2Cache.read(address):
+                                    thit += 1
+                                else:
+                                    tmiss += 1
 
             i_miss_rate = i_misses / (i_hits + i_misses) if (i_hits + i_misses) else 0
             d_miss_rate = d_misses / (d_hits + d_misses) if (d_hits + d_misses) else 0
+            l2MissRate = tmiss / (thit + tmiss) if (thit + tmiss) > 0 else 0  # calculating miss rate for l2 cache
+
+            i_hit_rate = 1 - i_miss_rate if (i_hits + i_misses) else 0
+            d_hit_rate = 1 - d_miss_rate if (d_hits + d_misses) else 0
+            l2HitRate = 1 - l2MissRate if (tmiss + thit) else 0
+
             i_amat = hit_time + (i_miss_rate * miss_penalty)
             d_amat = hit_time + (d_miss_rate * miss_penalty)
+            amat = hit_time + ((i_miss_rate + d_miss_rate) / 2) * (10 + l2MissRate * miss_penalty)
+
+            # we can expect the L1 caches to remain constant bc of the params we gave them
+            # print(f"i_hits: {i_hits}, i_misses: {d_hits}, L1I miss rate: {i_miss_rate}, L1I hit rate: {i_hit_rate}")
+
+            # the L2 cache MUST change bc it's the only place where we're changing anything
+            # print(f"thit: {thit}, tmiss: {tmiss}, L2MissRate: {l2MissRate}, L2HitRate: {l2HitRate}, amat: {amat}")
 
             writer.writerow({
                 'Assoc.': assoc,
@@ -121,10 +162,14 @@ def WBCacheSimulation(trace_name):
                 'L1I misses': i_misses,
                 'L1D accesses': d_hits,
                 'L1D misses': d_misses,
-                'L1I hit rate': f"{i_hits / (i_hits + i_misses) if (i_hits + i_misses) else 0:.4f}",
-                'L1D hit rate': f"{d_hits / (d_hits + d_misses) if (d_hits + d_misses) else 0:.4f}",
+                'L2 accesses': thit,
+                'L2 misses': tmiss,
+                'L1I hit rate': f"{i_hit_rate:.4f}",
+                'L1D hit rate': f"{d_hit_rate:.4f}",
+                'L2 hit rate': f"{l2HitRate: .4f}",
                 'L1I AMAT': f"{i_amat:.2f}",
-                'L1D AMAT': f"{d_amat:.2f}"
+                'L1D AMAT': f"{d_amat:.2f}",
+                'L2 AMAT': f"{amat:.2f}"
             })
 
     print(f"Results have been written to {csv_filename}")
@@ -155,6 +200,6 @@ def read_trace_file(file_path):
     return trace_lines
 
 
-filename = 'tex'  # Write 'cc', 'spice', or 'tex' here to change trace
+filename = ('spice')  # Write 'cc', 'spice', or 'tex' here to change trace
 trace_lines = read_trace_file(f"traces/{filename}.trace")
 WBCacheSimulation(filename)

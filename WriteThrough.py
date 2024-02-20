@@ -1,5 +1,5 @@
 """
-Author: Carter Young
+Author: Carter Young, EAVI
 Date: 02/09/2024 - 02/17/2024
 
 This code represents an implementation of steps 1 & 2 for CS
